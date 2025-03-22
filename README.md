@@ -44,6 +44,25 @@ A modern 3D space game built with Three.js and Node.js. Control your spaceship, 
    ```
 3. Open your browser and navigate to `http://localhost:3000`
 
+## HTTPS Setup
+
+The game server now runs on HTTPS for secure connections. To set up HTTPS:
+
+1. Generate SSL certificates (for development):
+   ```bash
+   ./generate-certificates.sh
+   ```
+   This will create self-signed certificates in the `certificates` directory.
+
+2. Start the server:
+   ```bash
+   npm start
+   ```
+
+3. Access the game at `https://localhost:3000`
+
+Note: When using self-signed certificates, your browser may show a security warning. This is normal in development. For production, use proper SSL certificates from a trusted certificate authority.
+
 ## Game Rules
 
 - Control your spaceship using the arrow keys
