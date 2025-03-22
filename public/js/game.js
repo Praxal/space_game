@@ -302,6 +302,17 @@ const bulletMaterial = new THREE.MeshPhongMaterial({
     opacity: 0.9
 });
 
+// Add after the bulletMaterial definition
+const thrustParticleCount = 10;
+const thrustParticleGeometry = new THREE.SphereGeometry(0.1, 8, 8);
+const thrustParticleMaterial = new THREE.MeshPhongMaterial({
+    color: 0xff6600,
+    emissive: 0xff3300,
+    emissiveIntensity: 1,
+    transparent: true,
+    opacity: 0.8
+});
+
 // Add trail effect for bullets
 function createBulletTrail() {
     const trailGeometry = new THREE.ConeGeometry(0.2, 1, 8);
@@ -317,6 +328,39 @@ function createBulletTrail() {
 
 // Add raycaster for target pointer
 const raycaster = new THREE.Raycaster();
+
+// Add explosion particle system
+function createExplosionParticles(position, color) {
+    const particleCount = 20;
+    const particles = [];
+    
+    for (let i = 0; i < particleCount; i++) {
+        const particle = new THREE.Mesh(
+            new THREE.SphereGeometry(0.2, 8, 8),
+            new THREE.MeshPhongMaterial({
+                color: color,
+                emissive: color,
+                emissiveIntensity: 1,
+                transparent: true,
+                opacity: 1
+            })
+        );
+        
+        particle.position.copy(position);
+        particle.userData.velocity = new THREE.Vector3(
+            (Math.random() - 0.5) * 0.2,
+            (Math.random() - 0.5) * 0.2,
+            (Math.random() - 0.5) * 0.2
+        );
+        particle.userData.life = 1.0;
+        particle.userData.decay = 0.02 + Math.random() * 0.02;
+        
+        particles.push(particle);
+        scene.add(particle);
+    }
+    
+    return particles;
+}
 
 // Game loop
 function animate() {
@@ -462,8 +506,21 @@ function animate() {
                 trail.rotation.x = Math.PI / 2;
                 bullet.add(trail);
                 
+                // Add thrust particles
+                const thrustParticles = [];
+                for (let i = 0; i < thrustParticleCount; i++) {
+                    const particle = new THREE.Mesh(thrustParticleGeometry, thrustParticleMaterial);
+                    particle.position.z = -0.5;
+                    particle.userData.velocity = new THREE.Vector3(0, 0, 0.1 + Math.random() * 0.1);
+                    particle.userData.life = 1.0;
+                    particle.userData.decay = 0.05 + Math.random() * 0.05;
+                    thrustParticles.push(particle);
+                    bullet.add(particle);
+                }
+                
                 // Add properties for animation
                 bullet.userData.trail = trail;
+                bullet.userData.thrustParticles = thrustParticles;
                 bullet.userData.initialTime = currentTime;
                 
                 bullets.push(bullet);
@@ -483,13 +540,26 @@ function animate() {
                 const trailOpacity = Math.max(0, 1 - timeSinceCreation / 500);
                 bullet.userData.trail.material.opacity = trailOpacity * 0.6;
             }
+            
+            // Update thrust particles
+            if (bullet.userData.thrustParticles) {
+                bullet.userData.thrustParticles.forEach(particle => {
+                    particle.position.z += particle.userData.velocity.z;
+                    particle.userData.life -= particle.userData.decay;
+                    particle.material.opacity = particle.userData.life;
+                    
+                    if (particle.userData.life <= 0) {
+                        bullet.remove(particle);
+                    }
+                });
+            }
 
             // Check collision with enemies
             for (let j = enemies.length - 1; j >= 0; j--) {
                 const enemy = enemies[j];
                 if (checkCollision(bullet, enemy)) {
-                    // Create explosion effect
-                    const explosionGeometry = new THREE.SphereGeometry(1, 16, 16);
+                    // Create enhanced explosion effect
+                    const explosionGeometry = new THREE.SphereGeometry(1.5, 16, 16);
                     const explosionMaterial = new THREE.MeshPhongMaterial({
                         color: 0xff6600,
                         emissive: 0xff3300,
@@ -500,12 +570,18 @@ function animate() {
                     const explosion = new THREE.Mesh(explosionGeometry, explosionMaterial);
                     explosion.position.copy(bullet.position);
                     explosion.userData.startTime = Date.now();
+                    explosion.userData.scaleSpeed = 0.1;
                     scene.add(explosion);
                     
+                    // Create debris particles
+                    const debrisParticles = createExplosionParticles(bullet.position, 0xcccccc);
+                    
+                    // Remove the enemy with a scale animation
+                    enemy.userData.destroying = true;
+                    enemy.userData.destroyStartTime = Date.now();
+                    
                     scene.remove(bullet);
-                    scene.remove(enemy);
                     bullets.splice(i, 1);
-                    enemies.splice(j, 1);
                     score += 10;
                     updateScore();
                     break;
@@ -519,17 +595,41 @@ function animate() {
             }
         }
 
-        // Update explosions
+        // Update explosions and destroying enemies
         scene.traverse((object) => {
             if (object.userData.startTime) {
                 const elapsed = Date.now() - object.userData.startTime;
-                const scale = 1 + elapsed / 200;
+                const scale = 1 + elapsed * object.userData.scaleSpeed;
                 const opacity = Math.max(0, 1 - elapsed / 500);
                 
                 object.scale.set(scale, scale, scale);
                 object.material.opacity = opacity;
                 
                 if (opacity <= 0) {
+                    scene.remove(object);
+                }
+            }
+            
+            if (object.userData.destroying) {
+                const elapsed = Date.now() - object.userData.destroyStartTime;
+                const scale = Math.max(0, 1 - elapsed / 300);
+                object.scale.set(scale, scale, scale);
+                
+                if (scale <= 0) {
+                    scene.remove(object);
+                    const index = enemies.indexOf(object);
+                    if (index > -1) {
+                        enemies.splice(index, 1);
+                    }
+                }
+            }
+            
+            if (object.userData.velocity) {
+                object.position.add(object.userData.velocity);
+                object.userData.life -= object.userData.decay;
+                object.material.opacity = object.userData.life;
+                
+                if (object.userData.life <= 0) {
                     scene.remove(object);
                 }
             }
@@ -568,7 +668,7 @@ document.getElementById('loading').style.display = 'none';
 // Create target pointer
 function createTargetPointer() {
     // Create outer ring
-    const outerRingGeometry = new THREE.RingGeometry(1.2, 1.5, 32);
+    const outerRingGeometry = new THREE.RingGeometry(0.6, 0.8, 32);
     const outerRingMaterial = new THREE.MeshBasicMaterial({ 
         color: 0xff0000,
         side: THREE.DoubleSide,
@@ -579,9 +679,9 @@ function createTargetPointer() {
     outerRing.rotation.x = Math.PI / 2;
 
     // Create inner ring
-    const innerRingGeometry = new THREE.RingGeometry(0.8, 1.1, 32);
+    const innerRingGeometry = new THREE.RingGeometry(0.4, 0.6, 32);
     const innerRingMaterial = new THREE.MeshBasicMaterial({ 
-        color: 0x00ffff,
+        color: 0xffff00,
         side: THREE.DoubleSide,
         transparent: true,
         opacity: 0.8
@@ -592,10 +692,10 @@ function createTargetPointer() {
     // Create crosshair
     const crosshairGeometry = new THREE.BufferGeometry();
     const crosshairVertices = new Float32Array([
-        -1.5, 0, 0,  // Horizontal line
-        1.5, 0, 0,
-        0, 0, -1.5,  // Vertical line
-        0, 0, 1.5
+        -0.8, 0, 0,  // Horizontal line
+        0.8, 0, 0,
+        0, 0, -0.8,  // Vertical line
+        0, 0, 0.8
     ]);
     crosshairGeometry.setAttribute('position', new THREE.BufferAttribute(crosshairVertices, 3));
     const crosshairMaterial = new THREE.LineBasicMaterial({ 
@@ -607,7 +707,7 @@ function createTargetPointer() {
     crosshair.rotation.x = Math.PI / 2;
 
     // Create projection indicator
-    const projectionGeometry = new THREE.RingGeometry(0.4, 0.6, 16);
+    const projectionGeometry = new THREE.RingGeometry(0.2, 0.3, 16);
     const projectionMaterial = new THREE.MeshBasicMaterial({
         color: 0xff0000,
         side: THREE.DoubleSide,
@@ -649,7 +749,7 @@ function initGame() {
     document.getElementById('loading').style.display = 'none';
 
     // Start the game loop
-animate(); 
+    animate();
 }
 
 // Start the game after everything is initialized
