@@ -14,6 +14,8 @@ const shootCooldown = 1000; // 1 second between shots
 let player = null; // Declare player as global variable
 let gameOverTime = 0;
 let finalExplosionParticles = [];
+let playerName = '';
+let leaderboardDiv = null;
 
 // Game controls
 const keys = {};
@@ -951,6 +953,13 @@ function createTargetPointer() {
 
 // Initialize everything and start the game
 function initGame() {
+    // Get player name
+    playerName = prompt('Enter your name:', 'Player') || 'Anonymous';
+    
+    // Create scene
+    scene = new THREE.Scene();
+    camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    
     // Create player ship
     player = createSpaceship(); // Assign to global player variable
     player.position.z = 5;
@@ -969,8 +978,11 @@ function initGame() {
     // Hide loading message
     document.getElementById('loading').style.display = 'none';
 
-    // Start the game loop
-animate(); 
+    // Create leaderboard
+    createLeaderboard();
+    
+    // Start animation
+    animate();
 }
 
 // Start the game after everything is initialized
@@ -1051,6 +1063,80 @@ function createGameOverScreen() {
             Press SPACE to restart
         </div>
     `;
+    
+    // Submit score when game ends
+    submitScore(score);
+    
     document.body.appendChild(gameOverDiv);
     return gameOverDiv;
-} 
+}
+
+// Add leaderboard creation function
+function createLeaderboard() {
+    leaderboardDiv = document.createElement('div');
+    leaderboardDiv.style.position = 'absolute';
+    leaderboardDiv.style.top = '10px';
+    leaderboardDiv.style.right = '10px';
+    leaderboardDiv.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+    leaderboardDiv.style.padding = '10px';
+    leaderboardDiv.style.borderRadius = '5px';
+    leaderboardDiv.style.color = '#ffffff';
+    leaderboardDiv.style.fontFamily = 'Arial, sans-serif';
+    leaderboardDiv.style.fontSize = '14px';
+    leaderboardDiv.style.minWidth = '200px';
+    leaderboardDiv.innerHTML = '<h3 style="margin: 0 0 10px 0; color: #ffff00;">Top Scores</h3>';
+    document.body.appendChild(leaderboardDiv);
+    updateLeaderboard();
+}
+
+// Add function to update leaderboard
+async function updateLeaderboard() {
+    try {
+        const response = await fetch('/api/scores');
+        const scores = await response.json();
+        
+        let html = '<h3 style="margin: 0 0 10px 0; color: #ffff00;">Top Scores</h3>';
+        html += '<table style="width: 100%; border-collapse: collapse;">';
+        html += '<tr><th style="text-align: left; padding: 2px 5px;">Player</th><th style="text-align: right; padding: 2px 5px;">Score</th></tr>';
+        
+        scores.forEach((score, index) => {
+            const isCurrentPlayer = score.playerName === playerName;
+            const rowStyle = isCurrentPlayer ? 'color: #ffff00;' : '';
+            html += `<tr style="${rowStyle}">
+                <td style="padding: 2px 5px;">${score.playerName}</td>
+                <td style="text-align: right; padding: 2px 5px;">${score.score}</td>
+            </tr>`;
+        });
+        
+        html += '</table>';
+        leaderboardDiv.innerHTML = html;
+    } catch (error) {
+        console.error('Error updating leaderboard:', error);
+    }
+}
+
+// Add function to submit score
+async function submitScore(finalScore) {
+    try {
+        const response = await fetch('/api/scores', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                playerName,
+                score: finalScore
+            })
+        });
+        
+        const result = await response.json();
+        if (result.success) {
+            updateLeaderboard();
+        }
+    } catch (error) {
+        console.error('Error submitting score:', error);
+    }
+}
+
+// Add periodic leaderboard updates
+setInterval(updateLeaderboard, 10000); // Update every 10 seconds 
