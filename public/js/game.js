@@ -401,7 +401,7 @@ function createDangerZone() {
 
 // Game loop
 function animate() {
-    requestAnimationFrame(animate);
+        requestAnimationFrame(animate);
     
     if (!gameOver.status) {
         // Update engine glow effect with reduced scale changes
@@ -563,6 +563,114 @@ function animate() {
                     scene.remove(dangerZone);
                     delete enemy.userData.dangerZone;
                 }
+            }
+
+            // Check collision with player
+            if (checkEnemyCollision(enemy)) {
+                // Decrease health
+                health -= 20;
+                updateHealth();
+
+                // Create explosion effect for the collision
+                const explosionGeometry = new THREE.SphereGeometry(1.5, 16, 16);
+                const explosionMaterial = new THREE.MeshPhongMaterial({
+                    color: 0xff6600,
+                    emissive: 0xff3300,
+                    emissiveIntensity: 2,
+                    transparent: true,
+                    opacity: 1
+                });
+                const explosion = new THREE.Mesh(explosionGeometry, explosionMaterial);
+                explosion.position.copy(enemy.position);
+                explosion.userData.startTime = Date.now();
+                explosion.userData.scaleSpeed = 0.1;
+                scene.add(explosion);
+
+                // Create debris particles
+                const debrisParticles = createExplosionParticles(enemy.position, 0xff0000);
+
+                // Remove the enemy and its danger zone
+                if (enemy.userData.dangerZone) {
+                    scene.remove(enemy.userData.dangerZone);
+                    delete enemy.userData.dangerZone;
+                }
+                scene.remove(enemy);
+                enemies.splice(i, 1);
+
+                // Check if health is depleted
+                if (health <= 0) {
+                    gameOver.status = true;
+                    gameOver.explosionStarted = true;
+                    gameOverTime = Date.now();
+
+                    // Create final explosion at player position
+                    const finalExplosion = new THREE.Mesh(
+                        new THREE.SphereGeometry(2, 32, 32),
+                        new THREE.MeshPhongMaterial({
+                            color: 0xff0000,
+                            emissive: 0xff0000,
+                            emissiveIntensity: 2,
+                            transparent: true,
+                            opacity: 1
+                        })
+                    );
+                    finalExplosion.position.copy(player.position);
+                    finalExplosion.userData.startTime = Date.now();
+                    finalExplosion.userData.scaleSpeed = 0.15;
+                    scene.add(finalExplosion);
+
+                    // Create multiple waves of particles for final explosion
+                    for (let i = 0; i < 3; i++) {
+                        setTimeout(() => {
+                            const particles = createExplosionParticles(player.position, 0xff0000);
+                            finalExplosionParticles.push(...particles);
+                        }, i * 200);
+                    }
+
+                    // Hide the player ship
+                    player.visible = false;
+
+                    // Show game over screen after a delay
+                    setTimeout(() => {
+                        const gameOverScreen = createGameOverScreen();
+
+                        // Add event listener for restart
+                        const handleRestart = (e) => {
+                            if (e.key === ' ' && gameOver.status) {
+                                // Remove game over screen
+                                gameOverScreen.remove();
+
+                                // Reset game state
+                                gameOver.status = false;
+                                gameOver.explosionStarted = false;
+                                score = 0;
+                                health = 100;
+                                updateScore();
+                                updateHealth();
+
+                                // Clear all enemies and bullets
+                                enemies.forEach(enemy => scene.remove(enemy));
+                                enemies.length = 0;
+                                bullets.forEach(bullet => scene.remove(bullet));
+                                bullets.length = 0;
+
+                                // Clear explosion particles
+                                finalExplosionParticles.forEach(particle => scene.remove(particle));
+                                finalExplosionParticles.length = 0;
+
+                                // Reset player
+                                player.visible = true;
+                                player.position.set(0, 0, 5);
+                                player.rotation.set(0, 0, 0);
+
+                                // Remove event listener
+                                document.removeEventListener('keydown', handleRestart);
+                            }
+                        };
+                        document.addEventListener('keydown', handleRestart);
+                    }, 1500);
+                }
+                continue;
             }
 
             // Remove danger zone when removing enemy
@@ -748,7 +856,7 @@ function animate() {
             return true;
         });
     }
-    
+
     renderer.render(scene, camera);
 }
 
@@ -862,7 +970,7 @@ function initGame() {
     document.getElementById('loading').style.display = 'none';
 
     // Start the game loop
-    animate();
+animate(); 
 }
 
 // Start the game after everything is initialized
