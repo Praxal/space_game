@@ -3,12 +3,17 @@ import * as THREE from 'three';
 // Game state
 let score = 0;
 let health = 100;
-let gameOver = false;
+let gameOver = {
+    status: false,
+    explosionStarted: false
+};
 let engineGlowTime = 0; // For pulsing engine effect
 let targetPointer = null; // For aiming assistance
 let lastShotTime = 0; // Moved outside animation loop
 const shootCooldown = 1000; // 1 second between shots
 let player = null; // Declare player as global variable
+let gameOverTime = 0;
+let finalExplosionParticles = [];
 
 // Game controls
 const keys = {};
@@ -326,25 +331,7 @@ function createBulletTrail() {
     return new THREE.Mesh(trailGeometry, trailMaterial);
 }
 
-// Add raycaster for target pointer
-const raycaster = new THREE.Raycaster();
-
-// Replace the trajectory line initialization with a simple line
-const trajectoryLine = new THREE.Line(
-    new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(0, 0, 1),
-        new THREE.Vector3(0, 0, -20)
-    ]),
-    new THREE.LineBasicMaterial({ 
-        color: 0x00ff00,
-        transparent: true,
-        opacity: 0.8,
-        linewidth: 2
-    })
-);
-scene.add(trajectoryLine);
-
-// Add explosion particle system
+// Add after the createBulletTrail function
 function createExplosionParticles(position, color) {
     const particleCount = 20;
     const particles = [];
@@ -377,11 +364,46 @@ function createExplosionParticles(position, color) {
     return particles;
 }
 
+// Add raycaster for target pointer
+const raycaster = new THREE.Raycaster();
+
+// Replace the trajectory line initialization with a simple line
+const trajectoryLine = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, 0, 1),
+        new THREE.Vector3(0, 0, -20)
+    ]),
+    new THREE.LineBasicMaterial({ 
+        color: 0x00ff00,
+        transparent: true,
+        opacity: 0.8,
+        linewidth: 2
+    })
+);
+scene.add(trajectoryLine);
+
+// Replace the collision warning material and function with danger zone system
+const dangerZoneMaterial = new THREE.MeshBasicMaterial({
+    color: 0xff0000,
+    transparent: true,
+    opacity: 0.2,
+    side: THREE.DoubleSide,
+    depthWrite: false
+});
+
+function createDangerZone() {
+    // Create a cylinder to represent the danger path
+    const geometry = new THREE.CylinderGeometry(0.8, 0.8, 20, 16);
+    const mesh = new THREE.Mesh(geometry, dangerZoneMaterial.clone());
+    mesh.rotation.x = Math.PI / 2;
+    return mesh;
+}
+
 // Game loop
 function animate() {
-    if (!gameOver) {
-        requestAnimationFrame(animate);
-
+    requestAnimationFrame(animate);
+    
+    if (!gameOver.status) {
         // Update engine glow effect with reduced scale changes
         engineGlowTime += 0.1;
         const pulseIntensity = Math.abs(Math.sin(engineGlowTime * 5)) * 2;
@@ -486,23 +508,72 @@ function animate() {
                 enemy.rotation.z += enemy.rotationSpeed;
             }
 
-            // Check collision with player
-            if (checkCollision(player, enemy)) {
-                health -= 20;
-                updateHealth();
-                scene.remove(enemy);
-                enemies.splice(i, 1);
-                if (health <= 0) {
-                    gameOver = true;
+            // Check if enemy is on collision course
+            const playerPos = new THREE.Vector3();
+            player.getWorldPosition(playerPos);
+            const enemyToPlayer = new THREE.Vector3().subVectors(playerPos, enemy.position);
+            const distance = enemyToPlayer.length();
+            
+            // Project enemy's path forward
+            const enemyPath = new THREE.Vector3(
+                enemy.position.x - playerPos.x,
+                enemy.position.y - playerPos.y,
+                0
+            ).length();
+            
+            // If enemy's path is close to player's position, show danger zone
+            if (enemyPath < 1.5 && !enemy.userData.dangerZone) {
+                const dangerZone = createDangerZone();
+                dangerZone.position.copy(enemy.position);
+                dangerZone.position.z = enemy.position.z + 10; // Center the zone between enemy and player
+                
+                // Set the danger zone's position to match enemy's x and y
+                dangerZone.position.x = enemy.position.x;
+                dangerZone.position.y = enemy.position.y;
+                
+                // Store the initial position for animation
+                dangerZone.userData.initialZ = enemy.position.z;
+                
+                enemy.userData.dangerZone = dangerZone;
+                scene.add(dangerZone);
+            }
+            
+            // Update danger zone
+            if (enemy.userData.dangerZone) {
+                const dangerZone = enemy.userData.dangerZone;
+                
+                // Update position
+                dangerZone.position.x = enemy.position.x;
+                dangerZone.position.y = enemy.position.y;
+                dangerZone.position.z = enemy.position.z + 10;
+                
+                // Calculate opacity based on how close the enemy is to player
+                const distanceToPlayer = enemy.position.z - playerPos.z;
+                const opacity = Math.min(0.3, Math.max(0.1, distanceToPlayer / 20));
+                dangerZone.material.opacity = opacity;
+                
+                // Pulse effect when enemy is close
+                if (distanceToPlayer < 5) {
+                    const pulseIntensity = (Math.sin(Date.now() * 0.01) + 1) * 0.5;
+                    dangerZone.material.opacity = opacity + pulseIntensity * 0.2;
                 }
-                continue; // Skip the rest of this iteration
+                
+                // Remove danger zone if enemy is no longer on collision course
+                if (enemyPath > 1.5) {
+                    scene.remove(dangerZone);
+                    delete enemy.userData.dangerZone;
+                }
             }
 
-            // Remove enemies that are too far past the player (much further than before)
-            if (enemy.position.z > 20) { // Changed from 10 to 20 to give more time for shooting
+            // Remove danger zone when removing enemy
+            if (enemy.position.z > 5) {
+                if (enemy.userData.dangerZone) {
+                    scene.remove(enemy.userData.dangerZone);
+                    delete enemy.userData.dangerZone;
+                }
                 scene.remove(enemy);
                 enemies.splice(i, 1);
-                // Removed health penalty for passing enemies
+                continue;
             }
         }
 
@@ -591,6 +662,12 @@ function animate() {
                     // Create debris particles
                     const debrisParticles = createExplosionParticles(bullet.position, 0xcccccc);
                     
+                    // Remove danger zone if it exists
+                    if (enemy.userData.dangerZone) {
+                        scene.remove(enemy.userData.dangerZone);
+                        delete enemy.userData.dangerZone;
+                    }
+                    
                     // Remove the enemy with a scale animation
                     enemy.userData.destroying = true;
                     enemy.userData.destroyStartTime = Date.now();
@@ -631,6 +708,11 @@ function animate() {
                 object.scale.set(scale, scale, scale);
                 
                 if (scale <= 0) {
+                    // Remove danger zone if it exists before removing the enemy
+                    if (object.userData.dangerZone) {
+                        scene.remove(object.userData.dangerZone);
+                        delete object.userData.dangerZone;
+                    }
                     scene.remove(object);
                     const index = enemies.indexOf(object);
                     if (index > -1) {
@@ -652,8 +734,21 @@ function animate() {
 
         // Update trajectory
         updateTrajectory();
+    } else if (gameOver.explosionStarted) {
+        // Update explosion particles during game over
+        finalExplosionParticles = finalExplosionParticles.filter(particle => {
+            if (particle.userData.life <= 0) {
+                scene.remove(particle);
+                return false;
+            }
+            
+            particle.position.add(particle.userData.velocity);
+            particle.userData.life -= particle.userData.decay;
+            particle.material.opacity = particle.userData.life;
+            return true;
+        });
     }
-
+    
     renderer.render(scene, camera);
 }
 
@@ -767,7 +862,7 @@ function initGame() {
     document.getElementById('loading').style.display = 'none';
 
     // Start the game loop
-animate(); 
+    animate();
 }
 
 // Start the game after everything is initialized
@@ -818,4 +913,36 @@ function updateTrajectory() {
     positions.setXYZ(0, startPoint.x, startPoint.y, startPoint.z);
     positions.setXYZ(1, endPoint.x, endPoint.y, endPoint.z);
     positions.needsUpdate = true;
+}
+
+// Add after the createEnemy function
+function checkEnemyCollision(enemy) {
+    const playerPosition = new THREE.Vector3();
+    player.getWorldPosition(playerPosition);
+    
+    const distance = enemy.position.distanceTo(playerPosition);
+    return distance < 1.5; // Increased collision radius for better visibility
+}
+
+// Add the game over screen creation function
+function createGameOverScreen() {
+    const gameOverDiv = document.createElement('div');
+    gameOverDiv.style.position = 'absolute';
+    gameOverDiv.style.top = '50%';
+    gameOverDiv.style.left = '50%';
+    gameOverDiv.style.transform = 'translate(-50%, -50%)';
+    gameOverDiv.style.color = '#ff0000';
+    gameOverDiv.style.fontSize = '48px';
+    gameOverDiv.style.fontWeight = 'bold';
+    gameOverDiv.style.textAlign = 'center';
+    gameOverDiv.style.textShadow = '2px 2px 4px #000000';
+    gameOverDiv.innerHTML = `
+        GAME OVER<br>
+        Score: ${score}<br>
+        <div style="font-size: 24px; margin-top: 20px; color: #ffffff;">
+            Press SPACE to restart
+        </div>
+    `;
+    document.body.appendChild(gameOverDiv);
+    return gameOverDiv;
 } 
