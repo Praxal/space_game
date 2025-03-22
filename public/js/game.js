@@ -329,6 +329,21 @@ function createBulletTrail() {
 // Add raycaster for target pointer
 const raycaster = new THREE.Raycaster();
 
+// Replace the trajectory line initialization with a simple line
+const trajectoryLine = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, 0, 1),
+        new THREE.Vector3(0, 0, -20)
+    ]),
+    new THREE.LineBasicMaterial({ 
+        color: 0x00ff00,
+        transparent: true,
+        opacity: 0.8,
+        linewidth: 2
+    })
+);
+scene.add(trajectoryLine);
+
 // Add explosion particle system
 function createExplosionParticles(position, color) {
     const particleCount = 20;
@@ -596,7 +611,7 @@ function animate() {
         }
 
         // Update explosions and destroying enemies
-        scene.traverse((object) => {
+        scene.children.forEach((object) => {
             if (object.userData.startTime) {
                 const elapsed = Date.now() - object.userData.startTime;
                 const scale = 1 + elapsed * object.userData.scaleSpeed;
@@ -634,6 +649,9 @@ function animate() {
                 }
             }
         });
+
+        // Update trajectory
+        updateTrajectory();
     }
 
     renderer.render(scene, camera);
@@ -749,8 +767,55 @@ function initGame() {
     document.getElementById('loading').style.display = 'none';
 
     // Start the game loop
-    animate();
+animate(); 
 }
 
 // Start the game after everything is initialized
-initGame(); 
+initGame();
+
+// Replace the updateTrajectory function
+function updateTrajectory() {
+    // Get player's world position
+    const playerPosition = new THREE.Vector3();
+    player.getWorldPosition(playerPosition);
+    
+    // Calculate start and end points
+    const startPoint = new THREE.Vector3(playerPosition.x, playerPosition.y, playerPosition.z + 1);
+    const endPoint = new THREE.Vector3(playerPosition.x, playerPosition.y, playerPosition.z - 20);
+    
+    // Check for intersections with enemies
+    const intersects = [];
+    raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+    raycaster.ray.direction.set(0, 0, -1);
+    raycaster.ray.origin.copy(startPoint);
+    
+    // Check for intersections with all enemies
+    enemies.forEach(enemy => {
+        const intersect = raycaster.intersectObject(enemy);
+        if (intersect.length > 0) {
+            intersects.push(intersect[0]);
+        }
+    });
+    
+    // If there are intersections, change color and adjust end point
+    if (intersects.length > 0) {
+        // Sort intersections by distance
+        intersects.sort((a, b) => a.distance - b.distance);
+        const closestIntersect = intersects[0];
+        
+        // Update end point to intersection point
+        endPoint.copy(closestIntersect.point);
+        
+        // Change color to red when intersecting with target
+        trajectoryLine.material.color.setHex(0xff0000);
+    } else {
+        // Reset color to green when not intersecting
+        trajectoryLine.material.color.setHex(0x00ff00);
+    }
+    
+    // Update line geometry
+    const positions = trajectoryLine.geometry.attributes.position;
+    positions.setXYZ(0, startPoint.x, startPoint.y, startPoint.z);
+    positions.setXYZ(1, endPoint.x, endPoint.y, endPoint.z);
+    positions.needsUpdate = true;
+} 
