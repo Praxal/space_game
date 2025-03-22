@@ -15,6 +15,8 @@ echo "🚀 Starting deployment to VM at $VM_IP..."
 # SSH into the VM and run deployment commands
 echo "🔄 Connecting to VM and deploying..."
 ssh -t praxal@$VM_IP "cd ~/space_game && \
+    echo '📥 Stashing any local changes...' && \
+    git stash && \
     echo '📥 Pulling latest changes from GitHub...' && \
     git pull origin main && \
     echo '🔨 Building and restarting Docker containers...' && \
