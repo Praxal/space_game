@@ -1,16 +1,32 @@
 #!/bin/bash
 
-# Pull the latest changes from git
-echo "Pulling latest changes from git..."
-git pull origin main
+# Check if IP address is provided
+if [ $# -eq 0 ]; then
+    echo "❌ Error: Please provide the VM IP address"
+    echo "Usage: ./deploy.sh <vm-ip>"
+    echo "Example: ./deploy.sh 123.456.789.0"
+    exit 1
+fi
 
-# Rebuild and restart the Docker container
-echo "Rebuilding and restarting Docker container..."
-sudo docker compose down
-sudo docker compose up -d --build
+VM_IP=$1
 
-# Check if the container is running
-echo "Checking container status..."
-sudo docker ps | grep space-game
+echo "🚀 Starting deployment to VM at $VM_IP..."
 
-echo "Deployment complete!" 
+# SSH into the VM and run deployment commands
+echo "🔄 Connecting to VM and deploying..."
+ssh -t praxal@$VM_IP "cd ~/space_game && \
+    echo '📥 Pulling latest changes from GitHub...' && \
+    git pull origin main && \
+    echo '🔨 Building and restarting Docker containers...' && \
+    sudo docker compose down && \
+    sudo docker compose up -d --build && \
+    echo '🔍 Checking container status...' && \
+    sudo docker ps | grep space-game && \
+    echo '✅ Deployment completed successfully!'"
+
+if [ $? -ne 0 ]; then
+    echo "❌ Deployment failed"
+    exit 1
+fi
+
+echo "🎉 Local deployment script completed" 
